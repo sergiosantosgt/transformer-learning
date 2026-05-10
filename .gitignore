@@ -1,0 +1,125 @@
+# .gitignore - Arquivos e pastas que NÃO devem ir para GitHub
+
+# ===== macOS =====
+# Arquivos criados pelo macOS (finais com ._)
+._*
+.DS_Store
+.AppleDouble
+.LSOverride
+*.swp
+*.swo
+
+# ===== Python =====
+# Cache do Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ===== Virtual Environment =====
+# Ambientes virtuais
+venv/
+ENV/
+env/
+.venv
+.env
+
+# ===== IDE =====
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+
+# Sublime
+*.sublime-project
+*.sublime-workspace
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# ===== Modelo Treinado (Grande!) =====
+# Checkpoints do modelo (~12.5 MB cada)
+model/*.pt
+model/checkpoint*.pt
+model/gpt_mini_best.pt
+model/gpt_mini_epoch_*.pt
+
+# ===== Histórico e Logs =====
+# Histórico de treinamento
+model/*_history.json
+model/*_loss.png
+model/*_loss.csv
+
+# Tokenizador treinado (vai ser regenerado)
+model/tokenizer.pkl
+
+# ===== Dataset =====
+# Dataset local (será baixado automaticamente)
+data/shakespeare.txt
+data/processed_data/
+data/cache/
+
+# ===== Streamlit =====
+# Cache do Streamlit
+.streamlit/
+streamlit_config.toml
+
+# ===== Sistema Operacional =====
+.Thumbs.db
+Thumbs.db
+.env.local
+.env.*.local
+
+# ===== Arquivos Temporários =====
+*.tmp
+*.temp
+*.log
+*.bak
+*~
+
+# ===== Executáveis =====
+*.exe
+*.dll
+*.so
+*.dylib
+
+# ===== Output =====
+output/
+results/
+plots/
+*.png
+*.jpg
+*.jpeg
+
+# ===== Específico do Projeto =====
+# Arquivo de testes locais
+test_output/
+debug/
+experiments/
+
+# ===== Comentário =====
+# Adicione aqui outras pastas/arquivos locais que não devem ser versionados
+# Exemplo: .env, senhas, chaves, dados privados, etc.
