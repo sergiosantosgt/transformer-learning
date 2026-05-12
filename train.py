@@ -83,7 +83,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch):
         num_batches += 1
         
         # Update barra de progresso
-        pbar.set_postfix({'loss': loss.item():.4f})
+        pbar.set_postfix({'loss': f'{loss.item():.4f}'})
     
     avg_loss = total_loss / num_batches
     return avg_loss
@@ -155,7 +155,7 @@ def train_model(
     
     # ===== Setup =====
     if device is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device = 'mps' if torch.backends.mps.is_available() else 'cpu'
     print(f"Usando device: {device}")
     
     os.makedirs(checkpoint_dir, exist_ok=True)

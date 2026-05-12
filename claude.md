@@ -16,7 +16,7 @@
 | **Tokenização** | Character-level | Simples, didático, suficiente para Shakespeare |
 | **Framework** | PyTorch | Padrão indústria, ótima documentação, flexibilidade |
 | **Python Version** | 3.11 | Moderno, melhor performance |
-| **Instalação** | Sistema Python (não venv) | Contorno de problema com espaços no caminho |
+| **Instalação** | venv isolado | Melhor prática, fácil reproduzir em qualquer máquina |
 
 ---
 
@@ -68,14 +68,22 @@ EOF
    - Encoding: UTF-8
 ```
 
-### Problema Encontrado ⚠️
+### Resolução de Problemas ✅
 
+**Problema 1: Espaço em caminho "Extreme SSD" com venv**
 ```
-❌ Erro: venv com espaço em caminho ("Extreme SSD")
+❌ Erro: venv com espaço em caminho
    Python Site Module falha com UnicodeDecodeError
    
-✅ Solução: Usar Python do sistema (--user flag)
-   Instalações em: /Users/sergiosantos/Library/Python/3.11/lib/python3.11/site-packages
+✅ Solução: Usar venv no novo diretório /transformer-learning
+   Sem espaços no caminho
+```
+
+**Problema 2: Perda de acesso ao Python do sistema**
+```
+❌ Erro: Dependências instaladas no ~/.local perdidas entre sessões
+   
+✅ Solução: venv isolado, reproducível em qualquer máquina
 ```
 
 ### Estrutura Criada
@@ -332,6 +340,90 @@ EOF
 
 ---
 
+## Fase 4: Otimização do Dataset (Stride) ✅ COMPLETO
+
+### 11 Maio 2026 - 14:30 PM
+
+**Problema Descoberto:**
+```
+❌ Dataset com 5.3 MILHÕES de amostras
+   Causa: Sliding window com stride=1 (cada posição = 1 amostra)
+   Resultado: 301.462 batches/época → 18 HORAS para 1 época!
+```
+
+**Diagnóstico:**
+```
+Antes (stride=1):
+  Dataset: 5.3M amostras
+  Batches: 301.462 (batch_size=16)
+  Tokens/época: 617M
+  Tempo: ~18 horas
+
+Esperado (stride=seq_len):
+  Dataset: ~42k amostras
+  Batches: 2.356 (batch_size=16)
+  Tokens/época: 4.8M
+  Tempo: ~9 minutos
+```
+
+**Solução Implementada em model/utils.py:**
+```python
+# Adicionar parâmetro 'stride' ao ShakespeareDataset
+self.stride = stride if stride is not None else seq_len  # Non-overlapping
+
+# Atualizar __len__() para usar stride
+return max(0, (self.num_tokens - self.seq_len) // self.stride + 1)
+
+# Atualizar __getitem__() para usar stride
+start_idx = idx * self.stride
+input_ids = self.token_ids[start_idx:start_idx + self.seq_len]
+```
+
+**Resultado:**
+```
+✅ Redução de 301.462 → 2.356 batches (128x mais rápido!)
+✅ Alinhamento com práticas padrão (non-overlapping chunks)
+✅ Treinamento agora viável em M1 Mac: ~45 min/5 épocas
+```
+
+---
+
+## Fase 5: Migração para venv + Documentação ✅ EM PROGRESSO
+
+### 11 Maio 2026 - 15:00 PM
+
+**Mudanças Implementadas:**
+
+1. **Virtual Environment Setup**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+2. **Atualização de claude.md**
+   - Adicionar Fase 4 (otimização dataset)
+   - Adicionar Fase 5 (venv migration)
+   - Documentar processo de otimização
+   - Atualizar tabela de Decisões
+
+3. **Atualização de README.md**
+   - Instruções claras de instalação com venv
+   - Remover referências ao Python do sistema
+   - Adicionar troubleshooting para venv
+   - Adequar tempos esperados
+
+**Benefícios:**
+```
+✅ Reproduzível em qualquer máquina
+✅ Sem dependências de sistema
+✅ Fácil compartilhar projeto
+✅ Sem conflitos com outros projetos
+✅ Possível fazer git push sem venv (adicionar ao .gitignore)
+```
+
+---
+
 ## Próximos Passos
 
 ### Imediato (Próxima sessão)
@@ -340,34 +432,29 @@ EOF
 2. ✅ Criar `gpt_mini.py` com modelo completo
 3. ✅ Criar `utils.py` com tokenização e dataset loader
 4. ✅ Testar imports e validar estrutura
+5. ✅ Criar `train.py` e treinar modelo
+6. ✅ Otimizar dataset (stride=seq_len)
+7. 🔄 **Concluir treinamento de 5 épocas**
 
-### Após Validação
+### Após Treinamento
 
-5. ✅ Criar `train.py` e treinar modelo (5-10 épocas)
-6. ✅ Criar `app.py` com Streamlit
-7. ✅ Implementar visualizações (histogramas, estatísticas)
-8. ✅ Criar `README.md` com instruções finais
-
-### Validação Final
-
+8. ⏳ Criar `app.py` com Streamlit
 9. ⏳ Testar geração de texto com diferentes temperaturas
 10. ⏳ Validar que loss converge
-11. ✅ Verificar que documentação é clara
-12. ⏳ Criar checkpoint do modelo treinado
+11. ⏳ Criar checkpoint do modelo treinado
+12. ⏳ Documentação final (GETTING_STARTED.md atualizado)
 
 ### Próximos Passos para o Usuário
 
-**Executar:**
+**Executar (com venv ativado):**
 ```bash
-# 1. Teste rápido dos componentes
-python3 -m model.transformer
-python3 -m model.gpt_mini
-python3 -m model.utils
+# Ativar venv
+source venv/bin/activate
 
-# 2. Treinar modelo
-python3 train.py --epochs 5 --batch-size 32
+# Treinar modelo
+python train.py --epochs 5 --batch-size 16 --seq-len 128
 
-# 3. Usar interface
+# Usar interface (após treinamento)
 streamlit run app.py
 ```
 
@@ -431,9 +518,11 @@ Escolhemos 8 porque:
 
 | Problema | Solução | Status |
 |----------|---------|--------|
-| venv com espaço no caminho | Usar Python do sistema | ✅ RESOLVIDO |
+| venv com espaço no caminho | Mover para /transformer-learning sem espaços | ✅ RESOLVIDO |
 | SSL certificate error | Contornar com `ssl._create_unverified_context()` | ✅ RESOLVIDO |
 | Dataset não baixava | Usar urllib com bypass SSL | ✅ RESOLVIDO |
+| Treinamento 18h/época | Implementar stride=seq_len (non-overlapping) | ✅ RESOLVIDO |
+| Dependências voláteis | Usar venv isolado no projeto | ✅ RESOLVIDO |
 
 ---
 

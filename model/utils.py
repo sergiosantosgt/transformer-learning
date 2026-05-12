@@ -139,7 +139,7 @@ class ShakespeareDataset(Dataset):
         tokenizer (CharacterTokenizer): Tokenizador para usar
     """
     
-    def __init__(self, filepath, seq_len=128, tokenizer=None):
+    def __init__(self, filepath, seq_len=128, tokenizer=None, stride=None):
         # Carregar arquivo
         print(f"Carregando {filepath}...")
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -151,6 +151,7 @@ class ShakespeareDataset(Dataset):
         
         self.tokenizer = tokenizer
         self.seq_len = seq_len
+        self.stride = stride if stride is not None else seq_len  # Non-overlapping por padrão
         self.vocab_size = tokenizer.vocab_size
         
         # Tokenizar
@@ -167,14 +168,14 @@ class ShakespeareDataset(Dataset):
         """
         Número de amostras possíveis.
         
-        Para cada posição no texto, podemos criar uma amostra:
-        (token[i:i+seq_len], token[i+1:i+seq_len+1])
+        Com stride=seq_len (padrão), cria chunks não-sobrepostos.
+        Reduz amostras de 5.3M (stride=1) para ~42k (stride=seq_len).
         
         Returns:
             int: Número de amostras
         """
-        # -1 porque último token não tem alvo
-        return max(0, self.num_tokens - self.seq_len)
+        # Calcular quantas "janelas" cabem com o stride especificado
+        return max(0, (self.num_tokens - self.seq_len) // self.stride + 1)
     
     def __getitem__(self, idx):
         """
@@ -194,9 +195,10 @@ class ShakespeareDataset(Dataset):
             # input_ids = tokens[0:10]
             # target_ids = tokens[1:11]
         """
-        # Extrair sequência
-        input_ids = self.token_ids[idx:idx + self.seq_len]
-        target_ids = self.token_ids[idx + 1:idx + self.seq_len + 1]
+        # Converter índice do dataset para posição no token array usando stride
+        start_idx = idx * self.stride
+        input_ids = self.token_ids[start_idx:start_idx + self.seq_len]
+        target_ids = self.token_ids[start_idx + 1:start_idx + self.seq_len + 1]
         
         return input_ids, target_ids
 

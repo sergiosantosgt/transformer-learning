@@ -10,36 +10,55 @@ Input:  "O gato comeu"
 Output: "O gato comeu o rato"
 ```
 
-## ⚡ Quick Start
+## 🚀 Instalação
 
-### 1. Verificar Setup
+### 1. Criar Virtual Environment
 
 ```bash
-cd /Volumes/Extreme\ SSD/IA/repos/my_model
+# Criar venv
+python3 -m venv venv
 
+# Ativar (Linux/Mac)
+source venv/bin/activate
+
+# Ativar (Windows)
+venv\\Scripts\\activate
+```
+
+### 2. Instalar Dependências
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Verificar Setup
+
+```bash
 # Verificar dependências
-python3 -c "import torch, pandas, streamlit; print('✅ Tudo instalado!')"
+python -c "import torch, pandas, streamlit; print('✅ Tudo instalado!')"
 
 # Verificar dataset
 ls -lh data/shakespeare.txt
 # Deve mostrar: ~5.2 MB
 ```
 
-### 2. Treinar Modelo
+## ⚡ Quick Start
+
+### 1. Treinar Modelo
 
 ```bash
-python3 train.py
+python train.py --epochs 5 --batch-size 16 --seq-len 128
 ```
 
 Será:
-- ✅ Carregar dataset
-- ✅ Treinar 5-10 épocas
-- ✅ Salvar modelo em `model/checkpoint.pt`
-- ✅ Plotar loss
+- ✅ Carregar dataset (reduzido com stride otimizado)
+- ✅ Treinar 5 épocas
+- ✅ Salvar modelo em `model/gpt_mini_best.pt`
+- ✅ Plotar loss em `model/gpt_mini_loss.png`
 
-Tempo esperado: **~10-30 minutos** (CPU)
+Tempo esperado: **~40-50 minutos** (M1 CPU com otimização de stride)
 
-### 3. Usar a Interface
+### 2. Usar a Interface
 
 ```bash
 streamlit run app.py
@@ -184,11 +203,33 @@ Esperado neste projeto: **2.5-3.5/5** (PoC)
 
 ## 🐛 Troubleshooting
 
-### "Erro: torch não encontrado"
+### Erro: "torch não encontrado"
 
 ```bash
-python3 -m pip install --user torch
+# Verificar se venv está ativado
+source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate     # Windows
+
+# Reinstalar
+pip install --upgrade torch numpy
 ```
+
+### Erro: "module not found: model"
+
+```bash
+# Executar do diretório raiz do projeto
+cd transformer-learning
+python train.py
+```
+
+### Treinamento muito lento
+
+```bash
+# Reduzir tamanho do batch ou sequência
+python train.py --batch-size 8 --seq-len 64 --epochs 1
+```
+
+Se ainda lento, reduzir ainda mais ou usar GPU (se disponível).
 
 ### "Dataset não encontrado"
 
