@@ -167,31 +167,24 @@ def main():
     
     st.success("✅ Modelo carregado!")
     
+    # ===== Botão de exemplo (antes do input para definir o valor padrão) =====
+    col1, col2 = st.columns(2)
+    with col1:
+        generate_button = st.button("🚀 Gerar Texto", key="generate")
+    with col2:
+        example_button = st.button("📖 Exemplo Clássico", key="example")
+
+    # Definir valor padrão do input
+    default_prompt = "To be or" if example_button else "To be or not to"
+
     # ===== Input =====
     st.write("### 📝 Entrada")
     prompt = st.text_input(
         "Digite um prompt:",
-        value="To be or not to",
+        value=default_prompt,
         placeholder="Digite aqui...",
         help="Comece com algo como 'To be', 'The', etc"
     )
-    
-    # ===== Botão de geração =====
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        generate_button = st.button("🚀 Gerar Texto", key="generate")
-    
-    with col2:
-        example_button = st.button("📖 Exemplo Clássico", key="example")
-    
-    if example_button:
-        prompt = "To be or"
-        st.text_input(
-            "Digite um prompt:",
-            value=prompt,
-            disabled=True
-        )
     
     # ===== Geração =====
     if generate_button and prompt:
@@ -328,7 +321,7 @@ def main():
                 with col4:
                     st.metric(
                         "Camadas",
-                        "4"
+                        str(len(model.transformer_blocks))
                     )
                 
             except Exception as e:

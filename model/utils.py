@@ -167,15 +167,15 @@ class ShakespeareDataset(Dataset):
     def __len__(self):
         """
         Número de amostras possíveis.
-        
+
         Com stride=seq_len (padrão), cria chunks não-sobrepostos.
         Reduz amostras de 5.3M (stride=1) para ~42k (stride=seq_len).
-        
+
         Returns:
             int: Número de amostras
         """
-        # Calcular quantas "janelas" cabem com o stride especificado
-        return max(0, (self.num_tokens - self.seq_len) // self.stride + 1)
+        # -1 garante que target_ids (offset +1) sempre tem seq_len elementos completos
+        return max(0, (self.num_tokens - self.seq_len - 1) // self.stride + 1)
     
     def __getitem__(self, idx):
         """

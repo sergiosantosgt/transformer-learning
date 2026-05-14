@@ -1,130 +1,74 @@
 """
-train.py - Script para treinar o modelo GPT Mini
-
-Este script:
-1. Carregar dataset e criar DataLoaders
-2. Inicializar modelo
-3. Loop de treinamento com validação
-4. Salvar checkpoint
-5. Plotar loss durante treinamento
+train.py - Treinar o modelo GPT Mini
 
 Uso:
-    python3 train.py
+    python train.py                  # Treinar com defaults
+    python train.py --epochs 50      # Ajustar épocas
+    python train.py --generate       # Gerar texto com modelo salvo
 """
 
 import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import json
 
-from model import GPTMini, create_data_loaders
+from model import GPTMini, create_data_loaders, CharacterTokenizer
+
+
+def _detect_device():
+    if torch.cuda.is_available():
+        return 'cuda'
+    if torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
 
 
 def train_epoch(model, train_loader, optimizer, criterion, device, epoch):
-    """
-    Executar uma época de treinamento.
-    
-    Args:
-        model: Modelo GPTMini
-        train_loader: DataLoader com dados de treino
-        optimizer: Otimizador (Adam, SGD, etc)
-        criterion: Função de loss (CrossEntropyLoss)
-        device: 'cpu' ou 'cuda'
-        epoch: Número da época
-    
-    Returns:
-        float: Loss médio da época
-    """
-    model.train()  # Modo de treinamento
+    model.train()
     total_loss = 0
     num_batches = 0
-    
+
     pbar = tqdm(train_loader, desc=f"Época {epoch+1}", leave=False)
-    
+
     for input_ids, target_ids in pbar:
         input_ids = input_ids.to(device)
         target_ids = target_ids.to(device)
-        
-        # ===== Forward pass =====
-        # input_ids: [batch_size, seq_len]
-        # logits: [batch_size, seq_len, vocab_size]
+
         logits = model(input_ids)
-        
-        # ===== Calcular loss =====
-        # Reshape para calcular loss
-        # Cross-entropy espera [batch_size*seq_len, vocab_size] e [batch_size*seq_len]
-        loss = criterion(
-            logits.view(-1, model.vocab_size),
-            target_ids.view(-1)
-        )
-        # Explicação:
-        # Para cada posição em cada batch, queremos que o modelo prediga o token correto
-        # Loss = -log(prob do token correto)
-        # Média sobre todas as posições e batches
-        
-        # ===== Backward pass =====
-        # Calcular gradientes
-        optimizer.zero_grad()  # Limpar gradientes anteriores
-        loss.backward()         # Calcular novos gradientes
-        
-        # ===== Clip gradients (opcional) =====
-        # Prevenir "exploding gradients"
+        loss = criterion(logits.view(-1, model.vocab_size), target_ids.view(-1))
+
+        optimizer.zero_grad()
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        
-        # ===== Update pesos =====
-        optimizer.step()  # Atualizar pesos baseado em gradientes
-        
-        # Acumular loss
+        optimizer.step()
+
         total_loss += loss.item()
         num_batches += 1
-        
-        # Update barra de progresso
         pbar.set_postfix({'loss': f'{loss.item():.4f}'})
-    
-    avg_loss = total_loss / num_batches
-    return avg_loss
+
+    return total_loss / num_batches
 
 
 def validate(model, val_loader, criterion, device):
-    """
-    Avaliar modelo em dataset de validação.
-    
-    Args:
-        model: Modelo GPTMini
-        val_loader: DataLoader com dados de validação
-        criterion: Função de loss
-        device: 'cpu' ou 'cuda'
-    
-    Returns:
-        float: Loss médio na validação
-    """
-    model.eval()  # Modo de avaliação (sem dropout, etc)
+    model.eval()
     total_loss = 0
     num_batches = 0
-    
-    with torch.no_grad():  # Não calcular gradientes (mais rápido)
+
+    with torch.no_grad():
         for input_ids, target_ids in val_loader:
             input_ids = input_ids.to(device)
             target_ids = target_ids.to(device)
-            
-            # Forward pass
+
             logits = model(input_ids)
-            
-            # Calcular loss
-            loss = criterion(
-                logits.view(-1, model.vocab_size),
-                target_ids.view(-1)
-            )
-            
+            loss = criterion(logits.view(-1, model.vocab_size), target_ids.view(-1))
+
             total_loss += loss.item()
             num_batches += 1
-    
-    avg_loss = total_loss / num_batches
-    return avg_loss
+
+    return total_loss / num_batches
 
 
 def train_model(
@@ -133,134 +77,99 @@ def train_model(
     checkpoint_dir="model",
     seq_len=128,
     batch_size=32,
-    num_epochs=15,
-    learning_rate=5e-4,
+    num_epochs=50,
+    learning_rate=3e-4,
     device=None,
-    save_every=1
+    early_stopping_patience=5,
+    d_model=256,
+    num_heads=8,
+    num_layers=3,
+    d_ff=1024,
+    dropout=0.5,
 ):
-    """
-    Executar loop completo de treinamento.
-    
-    Args:
-        model_name: Nome do modelo (para salvar)
-        dataset_path: Caminho do dataset
-        checkpoint_dir: Diretório para salvar checkpoints
-        seq_len: Comprimento da sequência
-        batch_size: Tamanho do batch
-        num_epochs: Número de épocas
-        learning_rate: Taxa de aprendizado
-        device: 'cpu', 'cuda', ou None (auto-detect)
-        save_every: Salvar checkpoint a cada N épocas
-    """
-    
-    # ===== Setup =====
     if device is None:
-        device = 'mps' if torch.backends.mps.is_available() else 'cpu'
+        device = _detect_device()
     print(f"Usando device: {device}")
-    
+
     os.makedirs(checkpoint_dir, exist_ok=True)
-    
-    # ===== Criar DataLoaders =====
+
     print("\n" + "=" * 60)
     print("CARREGANDO DATASET")
     print("=" * 60)
-    
+
     train_loader, val_loader, tokenizer = create_data_loaders(
         dataset_path,
         seq_len=seq_len,
         batch_size=batch_size,
         train_split=0.95,
-        num_workers=0
+        num_workers=0,
     )
-    
-    # Salvar tokenizador
     tokenizer.save(os.path.join(checkpoint_dir, "tokenizer.pkl"))
-    
-    # ===== Criar modelo =====
+
     print("\n" + "=" * 60)
     print("CRIANDO MODELO")
     print("=" * 60)
-    
+
     model = GPTMini(
         vocab_size=tokenizer.vocab_size,
         max_seq_len=seq_len,
-        d_model=512,
-        num_heads=8,
-        num_layers=4,
-        d_ff=2048,
-        dropout=0.3  # Aumentado para evitar overfitting
+        d_model=d_model,
+        num_heads=num_heads,
+        num_layers=num_layers,
+        d_ff=d_ff,
+        dropout=dropout,
     ).to(device)
-    
-    num_params = model.get_num_parameters()
-    size_mb = model.get_model_size_mb()
-    
-    print(f"Parâmetros: {num_params:,}")
-    print(f"Tamanho: {size_mb:.2f} MB")
-    print(f"Device: {device}")
-    
-    # ===== Setup de otimização =====
+
+    print(f"Parâmetros: {model.get_num_parameters():,}")
+    print(f"Tamanho:    {model.get_model_size_mb():.2f} MB")
+    print(f"Device:     {device}")
+
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.5)
-    
-    # ===== Loop de treinamento =====
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=num_epochs, eta_min=1e-6
+    )
+
     print("\n" + "=" * 60)
-    print("TREINANDO")
+    print("TREINANDO (com Early Stopping)")
     print("=" * 60)
-    
+
     train_losses = []
     val_losses = []
     best_val_loss = float('inf')
-    
+    patience_counter = 0
+    best_epoch = 0
+
+    config = {
+        'vocab_size': tokenizer.vocab_size,
+        'max_seq_len': seq_len,
+        'd_model': d_model,
+        'num_heads': num_heads,
+        'num_layers': num_layers,
+        'd_ff': d_ff,
+        'dropout': dropout,
+    }
+
     for epoch in range(num_epochs):
         print(f"\nÉpoca {epoch + 1}/{num_epochs}")
-        
-        # Treino
-        train_loss = train_epoch(
-            model, train_loader, optimizer, criterion, device, epoch
-        )
-        train_losses.append(train_loss)
-        print(f"  Train Loss: {train_loss:.4f}")
-        
-        # Validação
+
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch)
         val_loss = validate(model, val_loader, criterion, device)
+
+        train_losses.append(train_loss)
         val_losses.append(val_loss)
+
+        print(f"  Train Loss: {train_loss:.4f}")
         print(f"  Val Loss:   {val_loss:.4f}")
-        
-        # Scheduler step
+
         scheduler.step()
-        
-        # Salvar checkpoint
-        if (epoch + 1) % save_every == 0:
-            checkpoint_path = os.path.join(
-                checkpoint_dir,
-                f"{model_name}_epoch_{epoch+1}.pt"
-            )
-            
-            torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-                'config': {
-                    'vocab_size': tokenizer.vocab_size,
-                    'max_seq_len': seq_len,
-                    'd_model': 512,
-                    'num_heads': 8,
-                    'num_layers': 4,
-                    'd_ff': 2048,
-                }
-            }, checkpoint_path)
-            
-            print(f"  Checkpoint salvo: {checkpoint_path}")
-        
-        # Salvar melhor modelo
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_checkpoint_path = os.path.join(checkpoint_dir, f"{model_name}_best.pt")
-            
+            best_epoch = epoch + 1
+            patience_counter = 0
+
+            best_path = os.path.join(checkpoint_dir, f"{model_name}_best.pt")
             torch.save({
                 'epoch': epoch + 1,
                 'model_state_dict': model.state_dict(),
@@ -268,153 +177,118 @@ def train_model(
                 'scheduler_state_dict': scheduler.state_dict(),
                 'train_loss': train_loss,
                 'val_loss': val_loss,
-                'config': {
-                    'vocab_size': tokenizer.vocab_size,
-                    'max_seq_len': seq_len,
-                    'd_model': 512,
-                    'num_heads': 8,
-                    'num_layers': 4,
-                    'd_ff': 2048,
-                }
-            }, best_checkpoint_path)
-            
-            print(f"  Novo melhor modelo salvo!")
-    
-    # ===== Salvar histórico =====
+                'config': config,
+            }, best_path)
+            print(f"  Novo melhor modelo! (val_loss={best_val_loss:.4f})")
+        else:
+            patience_counter += 1
+            print(f"  Sem melhora ({patience_counter}/{early_stopping_patience})")
+
+        if patience_counter >= early_stopping_patience:
+            print(f"\nEarly stopping na época {epoch + 1}")
+            print(f"Melhor foi época {best_epoch} com val_loss={best_val_loss:.4f}")
+            break
+
     print("\n" + "=" * 60)
     print("FINALIZANDO")
     print("=" * 60)
-    
-    history = {
-        'train_losses': train_losses,
-        'val_losses': val_losses,
-        'epochs': num_epochs
-    }
-    
+
     history_path = os.path.join(checkpoint_dir, f"{model_name}_history.json")
     with open(history_path, 'w') as f:
-        json.dump(history, f, indent=2)
-    
-    # ===== Plotar loss =====
-    print("\nPlotando loss...")
-    
+        json.dump({
+            'train_losses': train_losses,
+            'val_losses': val_losses,
+            'epochs': len(train_losses),
+            'best_epoch': best_epoch,
+            'best_val_loss': float(best_val_loss),
+        }, f, indent=2)
+
+    plot_path = os.path.join(checkpoint_dir, f"{model_name}_loss.png")
     plt.figure(figsize=(10, 6))
-    plt.plot(train_losses, label='Train Loss', marker='o')
-    plt.plot(val_losses, label='Val Loss', marker='s')
+    plt.plot(range(1, len(train_losses) + 1), train_losses, label='Train Loss', marker='o')
+    plt.plot(range(1, len(val_losses) + 1), val_losses, label='Val Loss', marker='s')
+    plt.axvline(x=best_epoch, color='green', linestyle='--', label=f'Best (Epoch {best_epoch})')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
-    plt.title('Treinamento: GPT Mini com Shakespeare')
+    plt.title('Treinamento GPT Mini')
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    
-    plot_path = os.path.join(checkpoint_dir, f"{model_name}_loss.png")
     plt.savefig(plot_path, dpi=100)
     print(f"Gráfico salvo: {plot_path}")
-    plt.show()
-    
-    # ===== Resumo final =====
-    print("\n" + "=" * 60)
-    print("RESUMO FINAL")
-    print("=" * 60)
-    print(f"Épocas completadas: {num_epochs}")
-    print(f"Loss final de treino: {train_losses[-1]:.4f}")
-    print(f"Loss final de validação: {val_losses[-1]:.4f}")
-    print(f"Melhor loss de validação: {best_val_loss:.4f}")
-    print(f"Parâmetros: {num_params:,}")
-    print(f"\nArquivos salvos em: {checkpoint_dir}")
-    print("  - gpt_mini_best.pt (melhor modelo)")
-    print("  - gpt_mini_loss.png (gráfico)")
-    print("  - tokenizer.pkl (tokenizador)")
-    print("  - gpt_mini_history.json (histórico de loss)")
-    print("=" * 60)
 
+    print(f"\nMelhor época:     {best_epoch}")
+    print(f"Melhor val loss:  {best_val_loss:.6f}")
+    print(f"Arquivos em:      {checkpoint_dir}/")
 
-# ===== Teste de geração =====
 
 def generate_text(
     checkpoint_path="model/gpt_mini_best.pt",
     tokenizer_path="model/tokenizer.pkl",
     prompt="To be",
-    max_length=100,
-    temperature=1.0
+    max_length=200,
+    temperature=0.8,
+    top_p=0.95,
+    repetition_penalty=1.2,
 ):
-    """
-    Usar modelo treinado para gerar texto.
-    
-    Args:
-        checkpoint_path: Caminho do modelo salvo
-        tokenizer_path: Caminho do tokenizador
-        prompt: Texto inicial
-        max_length: Máximo de tokens para gerar
-        temperature: Criatividade (0.1 = determinístico, 2.0 = criativo)
-    """
-    from model import CharacterTokenizer, GPTMini
-    
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
-    # Carregar
+    device = _detect_device()
+
     tokenizer = CharacterTokenizer.load(tokenizer_path)
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    cfg = checkpoint['config']
+
     model = GPTMini(
-        vocab_size=checkpoint['config']['vocab_size'],
-        max_seq_len=checkpoint['config']['max_seq_len'],
-        d_model=checkpoint['config']['d_model'],
-        num_heads=checkpoint['config']['num_heads'],
-        num_layers=checkpoint['config']['num_layers'],
-        d_ff=checkpoint['config']['d_ff'],
+        vocab_size=cfg['vocab_size'],
+        max_seq_len=cfg['max_seq_len'],
+        d_model=cfg['d_model'],
+        num_heads=cfg['num_heads'],
+        num_layers=cfg['num_layers'],
+        d_ff=cfg['d_ff'],
+        dropout=cfg.get('dropout', 0.1),
     ).to(device)
-    
+
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    
-    # Gerar
+
     print(f"Prompt: {prompt}")
     print("-" * 60)
-    
+
     prompt_ids = tokenizer.encode(prompt)
     generated_ids = model.generate(
         prompt_ids,
         max_length=max_length,
         temperature=temperature,
-        device=device
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
+        device=device,
     )
-    
-    generated_text = tokenizer.decode(generated_ids)
-    print(generated_text)
+
+    print(tokenizer.decode(generated_ids))
     print("-" * 60)
 
 
 if __name__ == "__main__":
     import argparse
-    
-    parser = argparse.ArgumentParser(description="Treinar GPT Mini")
-    parser.add_argument('--epochs', type=int, default=15, help='Número de épocas')
-    parser.add_argument('--batch-size', type=int, default=32, help='Tamanho do batch')
-    parser.add_argument('--lr', type=float, default=5e-4, help='Taxa de aprendizado')
-    parser.add_argument('--seq-len', type=int, default=128, help='Comprimento da sequência')
-    parser.add_argument('--generate', action='store_true', help='Apenas gerar texto (não treinar)')
-    
+
+    parser = argparse.ArgumentParser(description="Treinar/usar GPT Mini")
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--lr', type=float, default=3e-4)
+    parser.add_argument('--seq-len', type=int, default=128)
+    parser.add_argument('--patience', type=int, default=5)
+    parser.add_argument('--generate', action='store_true', help='Gerar texto com modelo salvo')
+    parser.add_argument('--prompt', type=str, default='To be or', help='Prompt para geração')
+
     args = parser.parse_args()
-    
+
     if args.generate:
-        print("Gerando texto com modelo treinado...")
-        generate_text(
-            prompt="To be or",
-            max_length=100,
-            temperature=0.8
-        )
+        generate_text(prompt=args.prompt)
     else:
         print(f"Iniciando treinamento...")
-        print(f"  Epochs: {args.epochs}")
-        print(f"  Batch size: {args.batch_size}")
-        print(f"  Learning rate: {args.lr}")
-        print(f"  Seq length: {args.seq_len}")
-        
         train_model(
             num_epochs=args.epochs,
             batch_size=args.batch_size,
             learning_rate=args.lr,
-            seq_len=args.seq_len
+            seq_len=args.seq_len,
+            early_stopping_patience=args.patience,
         )

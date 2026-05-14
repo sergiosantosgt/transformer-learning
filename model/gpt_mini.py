@@ -134,13 +134,14 @@ class GPTMini(nn.Module):
         x = self.positional_encoding(x)
         
         # ===== Passo 3: Passar por Transformer Blocks =====
-        # Cada bloco:
-        # - Aplica multi-head attention
-        # - Aplica feed-forward network
-        # - Adiciona skip connections
-        # - Normaliza com LayerNorm
+        # Causal mask: posição i só pode ver posições 0..i (triângulo inferior)
+        # Essencial para GPT - sem isso o modelo "trapaceia" vendo tokens futuros
+        causal_mask = torch.tril(
+            torch.ones(seq_len, seq_len, device=input_ids.device)
+        ).unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, seq_len]
+
         for transformer_block in self.transformer_blocks:
-            x = transformer_block(x, mask=attention_mask)
+            x = transformer_block(x, mask=causal_mask)
         
         # ===== Passo 4: Layer Normalization final =====
         x = self.final_norm(x)
@@ -227,16 +228,11 @@ class GPTMini(nn.Module):
                 
                 # ===== NOVO: Aplicar penalização de repetição =====
                 if repetition_penalty != 1.0:
-                    # Contar frequência de cada token na sequência gerada
                     for batch_idx in range(generated.shape[0]):
-                        for token_id in range(self.vocab_size):
-                            # Contar quantas vezes este token aparece na sequência
-                            token_count = (generated[batch_idx] == token_id).sum().item()
-                            
-                            if token_count > 0:
-                                # Penalizar: dividir logit se já foi usado
-                                # Quanto mais vezes usado, maior a penalidade
-                                next_token_logits[batch_idx, token_id] /= repetition_penalty ** token_count
+                        # Iterar apenas nos tokens únicos presentes na sequência
+                        unique_tokens, counts = generated[batch_idx].unique(return_counts=True)
+                        for token_id, token_count in zip(unique_tokens.tolist(), counts.tolist()):
+                            next_token_logits[batch_idx, token_id] /= repetition_penalty ** token_count
                 
                 # ===== Converter logits em probabilidades (com temperatura) =====
                 probs = torch.softmax(next_token_logits / temperature, dim=-1)
@@ -261,10 +257,11 @@ class GPTMini(nn.Module):
                     # Nucleus (top-p) sampling: manter tokens que acumulam p% da probabilidade
                     sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
                     cumsum_probs = torch.cumsum(sorted_probs, dim=-1)
-                    
-                    # Marcar índices para remover (acima do threshold)
-                    sorted_indices_to_remove = cumsum_probs > top_p
-                    # Manter pelo menos 1 token (o mais provável)
+
+                    # Remover tokens onde o cumsum ANTES deste token já excedeu top_p
+                    # (shift de 1 para incluir o token que causa o cumsum ultrapassar p)
+                    sorted_indices_to_remove = cumsum_probs - sorted_probs > top_p
+                    # Garantir que pelo menos 1 token é mantido
                     sorted_indices_to_remove[..., 0] = False
                     
                     # Zerar probabilidades dos tokens marcados
