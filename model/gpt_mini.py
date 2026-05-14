@@ -162,6 +162,7 @@ class GPTMini(nn.Module):
         temperature=1.0,
         top_k=None,
         top_p=None,
+        repetition_penalty=1.2,
         device='cpu'
     ):
         """
@@ -183,6 +184,10 @@ class GPTMini(nn.Module):
                 - T > 1.0: Mais aleatório (mais criativo mas com erros)
             top_k (int): Se fornecido, considerar apenas top-k tokens mais prováveis
             top_p (float): Se fornecido, usar nucleus sampling (tokens acumulando p% probabilidade)
+            repetition_penalty (float): Penaliza tokens que já aparecem na sequência
+                - 1.0: Sem penalidade (padrão, mas permite repetição)
+                - 1.2: Penalidade moderada (recomendado, evita loops)
+                - 2.0+: Penalidade forte (pode limitare geração natural)
             device (str): 'cpu' ou 'cuda'
         
         Returns:
@@ -190,7 +195,12 @@ class GPTMini(nn.Module):
         
         Exemplo:
             prompt = [1, 2, 3]  # "To "
-            generated = model.generate(prompt, max_length=50, temperature=0.8)
+            generated = model.generate(
+                prompt, 
+                max_length=50, 
+                temperature=0.8,
+                repetition_penalty=1.2  # ← Evita loops!
+            )
             # generated = [1, 2, 3, 45, 12, 8, ...]
         """
         
@@ -205,7 +215,7 @@ class GPTMini(nn.Module):
         
         # Gerar tokens um por um
         with torch.no_grad():  # Não calcular gradientes (mais rápido)
-            for _ in range(max_length):
+            for step in range(max_length):
                 # Garantir que sequência não exceda max_seq_len
                 input_ids = generated[:, -self.max_seq_len:]
                 
@@ -213,41 +223,63 @@ class GPTMini(nn.Module):
                 logits = self.forward(input_ids)  # [batch, seq_len, vocab_size]
                 
                 # Pegar logits do último token (o que queremos prever)
-                next_token_logits = logits[:, -1, :] / temperature
-                # Dividir por temperatura: T baixa → picos mais altos
+                next_token_logits = logits[:, -1, :]  # [batch, vocab_size]
+                
+                # ===== NOVO: Aplicar penalização de repetição =====
+                if repetition_penalty != 1.0:
+                    # Contar frequência de cada token na sequência gerada
+                    for batch_idx in range(generated.shape[0]):
+                        for token_id in range(self.vocab_size):
+                            # Contar quantas vezes este token aparece na sequência
+                            token_count = (generated[batch_idx] == token_id).sum().item()
+                            
+                            if token_count > 0:
+                                # Penalizar: dividir logit se já foi usado
+                                # Quanto mais vezes usado, maior a penalidade
+                                next_token_logits[batch_idx, token_id] /= repetition_penalty ** token_count
+                
+                # ===== Converter logits em probabilidades (com temperatura) =====
+                probs = torch.softmax(next_token_logits / temperature, dim=-1)
                 
                 # ===== Aplicar filtros (opcional) =====
                 if top_k is not None:
-                    # Zerar probabilidades de todos tokens exceto top-k
-                    top_k_logits, top_k_indices = torch.topk(
-                        next_token_logits, 
-                        k=min(top_k, self.vocab_size)
-                    )
-                    next_token_logits.fill_(float('-inf'))
-                    next_token_logits.scatter_(1, top_k_indices, top_k_logits)
-                
-                if top_p is not None:
-                    # Nucleus sampling: selecionar tokens que acumulam ~p% da probabilidade
-                    sorted_logits, sorted_indices = torch.sort(
-                        next_token_logits, 
-                        descending=True
-                    )
-                    cumsum_probs = torch.cumsum(
-                        torch.softmax(sorted_logits, dim=-1), 
+                    # Top-k sampling: manter apenas os k tokens mais prováveis
+                    top_k_probs, top_k_indices = torch.topk(
+                        probs, 
+                        k=min(top_k, self.vocab_size),
                         dim=-1
                     )
-                    sorted_indices_to_remove = cumsum_probs > top_p
-                    sorted_logits[sorted_indices_to_remove] = float('-inf')
-                    next_token_logits.scatter_(1, sorted_indices, sorted_logits)
+                    
+                    # Criar tensor zerado e preencher com top-k
+                    probs_filtered = torch.zeros_like(probs)
+                    probs_filtered.scatter_(-1, top_k_indices, top_k_probs)
+                    
+                    # Re-normalizar para garantir que soma = 1
+                    probs = probs_filtered / (probs_filtered.sum(dim=-1, keepdim=True) + 1e-10)
                 
-                # ===== Converter logits em probabilidades =====
-                # softmax([10, 20, 5]) → [0.05, 0.88, 0.07]
-                probs = torch.softmax(next_token_logits, dim=-1)
+                if top_p is not None:
+                    # Nucleus (top-p) sampling: manter tokens que acumulam p% da probabilidade
+                    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+                    cumsum_probs = torch.cumsum(sorted_probs, dim=-1)
+                    
+                    # Marcar índices para remover (acima do threshold)
+                    sorted_indices_to_remove = cumsum_probs > top_p
+                    # Manter pelo menos 1 token (o mais provável)
+                    sorted_indices_to_remove[..., 0] = False
+                    
+                    # Zerar probabilidades dos tokens marcados
+                    sorted_probs[sorted_indices_to_remove] = 0
+                    
+                    # Reverter para índices originais
+                    probs_filtered = torch.zeros_like(probs)
+                    probs_filtered.scatter_(-1, sorted_indices, sorted_probs)
+                    
+                    # Re-normalizar
+                    probs = probs_filtered / (probs_filtered.sum(dim=-1, keepdim=True) + 1e-10)
                 
                 # ===== Amostrar próximo token =====
                 # Selecionar aleatoriamente baseado em probabilidades
-                next_token = torch.multinomial(probs, num_samples=1)
-                # [batch, 1]
+                next_token = torch.multinomial(probs, num_samples=1)  # [batch, 1]
                 
                 # Adicionar à sequência gerada
                 generated = torch.cat([generated, next_token], dim=1)

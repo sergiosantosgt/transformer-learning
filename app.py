@@ -92,12 +92,13 @@ def main():
         "🌡️ Temperatura (Criatividade)",
         min_value=0.1,
         max_value=2.0,
-        value=1.0,
+        value=0.8,
         step=0.1,
         help="""
-        - 0.1-0.5: Repetitivo, segue padrões
+        - 0.1-0.5: Determinístico, segue padrões
+        - 0.7-0.9: Recomendado (balanceado)
         - 1.0: Balanceado
-        - 1.5-2.0: Criativo, mais erros
+        - 1.5-2.0: Muito criativo, mais erros
         """
     )
     
@@ -109,18 +110,54 @@ def main():
         step=10
     )
     
+    st.sidebar.markdown("### Técnicas Avançadas")
+    
+    repetition_penalty = st.sidebar.slider(
+        "⛔ Penalidade de Repetição",
+        min_value=1.0,
+        max_value=3.0,
+        value=1.2,
+        step=0.1,
+        help="""
+        Evita loops de tokens repetidos:
+        - 1.0: Sem penalidade (pode gerar 'oooooo')
+        - 1.2: Recomendado ✓
+        - 1.5-2.0: Forte (pode limitar gerações naturais)
+        """
+    )
+    
+    top_p = st.sidebar.slider(
+        "🎯 Top-P (Nucleus Sampling)",
+        min_value=0.5,
+        max_value=1.0,
+        value=0.95,
+        step=0.05,
+        help="""
+        Manter tokens que acumulam p% da probabilidade:
+        - 0.5-0.8: Mais restritivo, menos criativo
+        - 0.9-0.95: Recomendado ✓
+        - 1.0: Sem filtro
+        """
+    )
+    
     st.sidebar.markdown("### Sobre o Modelo")
     st.sidebar.write(f"""
     **Arquitetura:**
-    - 4 camadas Transformer
+    - 3 camadas Transformer
     - 8 cabeças de atenção
-    - 512 dimensões
-    - ~2.5M parâmetros
+    - 256 dimensões
+    - ~2.4M parâmetros
     
     **Dataset:**
     - Shakespeare completo
-    - ~1M palavras / 5.2 MB
+    - ~5.3M tokens
     - Character-level tokenization
+    - 95 caracteres únicos
+    
+    **Treinamento:**
+    - Early stopping (parou em época 49)
+    - Val loss: 0.021
+    - Dropout: 0.5
     """)
     
     # ===== Carregar modelo =====
@@ -171,6 +208,8 @@ def main():
                         prompt_ids,
                         max_length=max_length,
                         temperature=temperature,
+                        repetition_penalty=repetition_penalty,
+                        top_p=top_p,
                         device=device
                     )
                 
@@ -181,8 +220,36 @@ def main():
                 st.markdown("#### Texto Gerado:")
                 st.info(generated_text)
                 
+                # ===== Análise de Repetições =====
+                def detect_repetitions(text, min_length=3):
+                    """Detectar sequências repetidas no texto."""
+                    repetitions = []
+                    for length in range(min_length, min(len(text) // 2, 10)):
+                        for i in range(len(text) - length):
+                            pattern = text[i:i+length]
+                            count = 0
+                            idx = i + length
+                            while idx + length <= len(text) and text[idx:idx+length] == pattern:
+                                count += 1
+                                idx += length
+                            if count > 0:
+                                repetitions.append({
+                                    'pattern': pattern,
+                                    'position': i,
+                                    'repetitions': count,
+                                    'length': length
+                                })
+                    return repetitions
+                
+                reps = detect_repetitions(generated_text)
+                if reps:
+                    max_rep = max(r['repetitions'] for r in reps)
+                    st.warning(f"⚠️ Detectado padrão repetitivo (máx {max_rep}x: '{reps[0]['pattern']}')")
+                else:
+                    st.success("✅ Sem padrões repetitivos detectados")
+                
                 # Estatísticas
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
                     st.metric(
@@ -197,6 +264,12 @@ def main():
                     )
                 
                 with col3:
+                    st.metric(
+                        "⛔ Penalidade",
+                        f"{repetition_penalty:.1f}"
+                    )
+                
+                with col4:
                     st.metric(
                         "⚡ Device",
                         device.upper()

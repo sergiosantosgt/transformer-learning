@@ -133,8 +133,8 @@ def train_model(
     checkpoint_dir="model",
     seq_len=128,
     batch_size=32,
-    num_epochs=5,
-    learning_rate=1e-3,
+    num_epochs=15,
+    learning_rate=5e-4,
     device=None,
     save_every=1
 ):
@@ -188,7 +188,7 @@ def train_model(
         num_heads=8,
         num_layers=4,
         d_ff=2048,
-        dropout=0.1
+        dropout=0.3  # Aumentado para evitar overfitting
     ).to(device)
     
     num_params = model.get_num_parameters()
@@ -390,9 +390,9 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Treinar GPT Mini")
-    parser.add_argument('--epochs', type=int, default=5, help='Número de épocas')
+    parser.add_argument('--epochs', type=int, default=15, help='Número de épocas')
     parser.add_argument('--batch-size', type=int, default=32, help='Tamanho do batch')
-    parser.add_argument('--lr', type=float, default=1e-3, help='Taxa de aprendizado')
+    parser.add_argument('--lr', type=float, default=5e-4, help='Taxa de aprendizado')
     parser.add_argument('--seq-len', type=int, default=128, help='Comprimento da sequência')
     parser.add_argument('--generate', action='store_true', help='Apenas gerar texto (não treinar)')
     
